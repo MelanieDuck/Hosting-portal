@@ -14,7 +14,7 @@ import { SetupPage } from '@/pages/Setup';
 import { Spinner } from '@/components/ui';
 
 function getRouteFromHash(): { page: PageKey; auth: 'login' | 'signup' | null; isSetup: boolean } {
-  const hash = window.location.hash.slice(1);
+  let hash = window.location.hash.slice(1);
    if (hash.startsWith('/')) hash = hash.slice(1); 
   if (hash === 'login') return { page: 'dashboard', auth: 'login', isSetup: false };
   if (hash === 'signup') return { page: 'dashboard', auth: 'signup', isSetup: false };
