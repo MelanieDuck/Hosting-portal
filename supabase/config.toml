@@ -1,0 +1,17 @@
+project_id = "uyzjnkniypihqvetobqw"
+
+[functions.send-cancellation-email]
+verify_jwt = true
+entrypoint = "./functions/send-cancellation-email/index.ts"
+
+[functions.send-payment-reminder]
+verify_jwt = false
+entrypoint = "./functions/send-payment-reminder/index.ts"
+
+[functions.stripe-checkout]
+verify_jwt = true
+entrypoint = "./functions/stripe-checkout/index.ts"
+
+[functions.stripe-webhook]
+verify_jwt = false
+entrypoint = "./functions/stripe-webhook/index.ts"
