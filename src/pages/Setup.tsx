@@ -39,49 +39,39 @@ export function SetupPage() {
     validateToken(tokenParam);
   }, []);
 
-  const validateToken = async (tokenValue: string) => {
-    try {
-      const { data: tokenData, error: tokenError } = await supabase
-        .from('invite_tokens')
-        .select('*')
-        .eq('token', tokenValue)
-        .maybeSingle();
+ const validateToken = async (tokenValue: string) => {
+  try {
+    const { data, error } = await supabase
+      .rpc('validate_invite_token', { p_token: tokenValue })
+      .maybeSingle();
 
-      if (tokenError || !tokenData) {
-        setTokenState('invalid');
-        return;
-      }
-
-      const inviteToken = tokenData as InviteToken;
-
-      if (inviteToken.used_at) {
-        setTokenState('used');
-        return;
-      }
-
-      if (new Date(inviteToken.expires_at).getTime() < Date.now()) {
-        setTokenState('expired');
-        return;
-      }
-
-      const { data: clientData, error: clientError } = await supabase
-        .from('pending_clients')
-        .select('*')
-        .eq('id', inviteToken.client_id)
-        .maybeSingle();
-
-      if (clientError || !clientData) {
-        setTokenState('invalid');
-        return;
-      }
-
-      setClient(clientData as PendingClient);
-      setToken(inviteToken);
-      setTokenState('valid');
-    } catch {
+    if (error || !data || !data.token_valid) {
       setTokenState('invalid');
+      return;
     }
-  };
+
+    if (data.token_used) {
+      setTokenState('used');
+      return;
+    }
+
+    if (data.token_expired) {
+      setTokenState('expired');
+      return;
+    }
+
+    setClient({
+      id: data.client_id,
+      full_name: data.full_name,
+      email: data.email,
+      notes: data.notes,
+    } as PendingClient);
+    setToken({ token: tokenValue } as InviteToken);
+    setTokenState('valid');
+  } catch {
+    setTokenState('invalid');
+  }
+};
 
   const handleCheckout = async () => {
     if (!client || !token) return;
