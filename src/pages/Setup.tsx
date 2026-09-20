@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import {
   CheckCircle2,
   XCircle,
@@ -8,14 +8,16 @@ import {
   Loader2,
   ArrowRight,
   ShieldCheck,
+  Lock,
 } from 'lucide-react';
 import { supabase, type PendingClient, type InviteToken } from '@/lib/supabase';
-import { Button } from '@/components/ui';
+import { Button, Input } from '@/components/ui';
 import { Logo } from '@/components/Logo';
 
 const STRIPE_PRICE_ID = import.meta.env.VITE_STRIPE_PRICE_ID ?? '';
 
 type TokenState = 'checking' | 'valid' | 'invalid' | 'expired' | 'used';
+type SetupStep = 'checkout' | 'password' | 'activating' | 'done' | 'error';
 
 export function SetupPage() {
   const [tokenState, setTokenState] = useState<TokenState>('checking');
@@ -23,6 +25,10 @@ export function SetupPage() {
   const [token, setToken] = useState<InviteToken | null>(null);
   const [redirecting, setRedirecting] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
+  const [step, setStep] = useState<SetupStep>('checkout');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [activationError, setActivationError] = useState('');
 
   useEffect(() => {
     const hash = window.location.hash.slice(1);
@@ -31,47 +37,64 @@ export function SetupPage() {
       ? new URLSearchParams(hash.slice(queryStart + 1))
       : new URLSearchParams();
     const tokenParam = params.get('token');
+    const statusParam = params.get('status');
+
     if (!tokenParam) {
       setTokenState('invalid');
       return;
     }
 
-    validateToken(tokenParam);
+    validateToken(tokenParam, statusParam);
   }, []);
 
- const validateToken = async (tokenValue: string) => {
-  try {
-    const { data, error } = await supabase
-      .rpc('validate_invite_token', { p_token: tokenValue })
-      .maybeSingle();
+  const validateToken = async (tokenValue: string, status?: string | null) => {
+    try {
+      const { data, error } = await supabase
+        .rpc('validate_invite_token', { p_token: tokenValue })
+        .maybeSingle();
 
-    if (error || !data || !data.token_valid) {
+      const result = data as {
+        token_valid: boolean;
+        token_used: boolean;
+        token_expired: boolean;
+        client_id: string;
+        full_name: string;
+        email: string;
+        notes: string | null;
+      } | null;
+
+      if (error || !result || !result.token_valid) {
+        setTokenState('invalid');
+        return;
+      }
+
+      if (data.token_used && status !== 'success') {
+        setTokenState('used');
+        return;
+      }
+
+      if (data.token_expired) {
+        setTokenState('expired');
+        return;
+      }
+
+      setClient({
+        id: data.client_id,
+        full_name: data.full_name,
+        email: data.email,
+        notes: data.notes,
+      } as PendingClient);
+      setToken({ token: tokenValue } as InviteToken);
+      setTokenState('valid');
+
+      // If returning from Stripe with status=success, jump to password step
+      if (status === 'success') {
+        setStep('password');
+      }
+    } catch {
       setTokenState('invalid');
-      return;
     }
-
-    if (data.token_used) {
-      setTokenState('used');
-      return;
-    }
-
-    if (data.token_expired) {
-      setTokenState('expired');
-      return;
-    }
-
-    setClient({
-      id: data.client_id,
-      full_name: data.full_name,
-      email: data.email,
-      notes: data.notes,
-    } as PendingClient);
-    setToken({ token: tokenValue } as InviteToken);
-    setTokenState('valid');
-  } catch {
-    setTokenState('invalid');
-  }
-};
+  };
 
   const handleCheckout = async () => {
     if (!client || !token) return;
@@ -119,6 +142,55 @@ export function SetupPage() {
       setCheckoutError(msg);
     } finally {
       setRedirecting(false);
+    }
+  };
+
+  const handleSetPassword = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!client || !token) return;
+    setActivationError('');
+
+    if (password.length < 6) {
+      setActivationError('Password must be at least 6 characters.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setActivationError('Passwords do not match.');
+      return;
+    }
+
+    setStep('activating');
+
+    try {
+      // 1. Create the auth account
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: client.email,
+        password,
+        options: { data: { full_name: client.full_name } },
+      });
+
+      if (signUpError) {
+        throw new Error(
+          signUpError.message.includes('already registered')
+            ? 'An account with this email already exists. Please sign in.'
+            : signUpError.message,
+        );
+      }
+
+      // 2. Activate: wire up Stripe customer + subscription + payment records
+      const { error: activateError } = await supabase
+        .rpc('activate_pending_client', { p_email: client.email });
+
+      if (activateError) {
+        console.error('Activation failed:', activateError);
+        throw new Error('Your account was created but we could not link your subscription. Please contact support.');
+      }
+
+      setStep('done');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Something went wrong during activation';
+      setActivationError(msg);
+      setStep('error');
     }
   };
 
@@ -181,7 +253,119 @@ export function SetupPage() {
     );
   }
 
-  // Valid token — show welcome + checkout
+  // --- DONE step: account activated, redirect to login ---
+  if (step === 'done') {
+    return (
+      <SetupShell>
+        <div className="text-center space-y-6">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto">
+            <CheckCircle2 className="w-8 h-8 text-emerald-600" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Your account is ready</h1>
+            <p className="text-sm text-slate-500 mt-2 max-w-md mx-auto">
+              Your subscription is active and your first payment has been recorded.
+              Sign in to access your hosting portal.
+            </p>
+          </div>
+          <a
+            href="/#/login"
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors"
+          >
+            Sign in to your portal
+            <ArrowRight className="w-4 h-4" />
+          </a>
+        </div>
+      </SetupShell>
+    );
+  }
+
+  // --- PASSWORD step: set password after returning from Stripe ---
+  if (step === 'password' || step === 'activating' || step === 'error') {
+    return (
+      <SetupShell>
+        <div className="space-y-6">
+          <div className="text-center">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-50 flex items-center justify-center mx-auto mb-4">
+              <CheckCircle2 className="w-8 h-8 text-emerald-600" />
+            </div>
+            <h1 className="text-2xl font-bold text-slate-900">
+              Payment complete — set your password
+            </h1>
+            <p className="text-sm text-slate-500 mt-2 max-w-md mx-auto">
+              Your payment was successful. Now create a password to access your hosting portal.
+              {client?.email && (
+                <>
+                  <br />
+                  <span className="font-medium text-slate-700">{client.email}</span>
+                </>
+              )}
+            </p>
+          </div>
+
+          {activationError && (
+            <div className="flex items-start gap-3 p-4 rounded-xl bg-red-50 border border-red-200">
+              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-700">{activationError}</p>
+            </div>
+          )}
+
+          <form onSubmit={handleSetPassword} className="space-y-4">
+            <Input
+              label="Password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              required
+              minLength={6}
+              autoFocus
+            />
+            <Input
+              label="Confirm password"
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="•••••••••"
+              required
+              minLength={6}
+            />
+
+            <Button
+              type="submit"
+              size="lg"
+              className="w-full"
+              loading={step === 'activating'}
+            >
+              {step === 'activating' ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Activating your account...
+                </>
+              ) : (
+                <>
+                  <Lock className="w-5 h-5" />
+                  Create account & activate
+                </>
+              )}
+            </Button>
+          </form>
+
+          {step === 'error' && (
+            <p className="text-center text-sm text-slate-500">
+              You can try again, or{' '}
+              <a href="/#/login" className="font-medium text-slate-900 underline hover:no-underline">
+                sign in
+              </a>{' '}
+              if you already have an account.
+            </p>
+          )}
+        </div>
+      </SetupShell>
+    );
+  }
+
+  // --- CHECKOUT step: initial landing, show welcome + checkout button ---
   const firstName = client?.full_name?.split(' ')[0] || 'there';
 
   return (
@@ -223,7 +407,7 @@ export function SetupPage() {
             />
             <Step
               num={3}
-              title="Complete your account"
+              title="Set your password"
               description="After payment, you'll set a password to access your hosting portal."
             />
           </div>

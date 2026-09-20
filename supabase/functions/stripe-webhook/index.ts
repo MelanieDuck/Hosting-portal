@@ -99,7 +99,8 @@ async function handleEvent(event: Stripe.Event) {
 
       // If this was an invite flow checkout, mark the token as used and update pending client
       if (pendingClientId && inviteToken && payment_status === 'paid') {
-        await handleInviteCompletion(pendingClientId, inviteToken);
+        const session = stripeData as Stripe.Checkout.Session;
+        await handleInviteCompletion(pendingClientId, inviteToken, customerId, session);
       }
     } else if (mode === 'payment' && payment_status === 'paid') {
       try {
@@ -132,7 +133,8 @@ async function handleEvent(event: Stripe.Event) {
 
         // Also handle invite completion for one-time payments
         if (pendingClientId && inviteToken) {
-          await handleInviteCompletion(pendingClientId, inviteToken);
+          const session = stripeData as Stripe.Checkout.Session;
+          await handleInviteCompletion(pendingClientId, inviteToken, customerId, session);
         }
       } catch (error) {
         console.error('Error processing one-time payment:', error);
@@ -141,9 +143,45 @@ async function handleEvent(event: Stripe.Event) {
   }
 }
 
-async function handleInviteCompletion(pendingClientId: string, inviteTokenValue: string) {
+async function handleInviteCompletion(
+  pendingClientId: string,
+  inviteTokenValue: string,
+  customerId: string,
+  session: Stripe.Checkout.Session,
+) {
   try {
     console.info(`Processing invite completion for client ${pendingClientId}`);
+
+    // Extract plan details from the checkout session's line items / price
+    let planName = 'Hosting Plan';
+    let planAmount: number | null = null;
+    let planCurrency: string | null = null;
+    let billingCycle = 'monthly';
+
+    try {
+      const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 1 });
+      if (lineItems.data.length > 0) {
+        const price = lineItems.data[0].price;
+        if (price) {
+          planAmount = price.unit_amount ? price.unit_amount / 100 : null;
+          planCurrency = price.currency;
+          if (price.recurring?.interval === 'year') {
+            billingCycle = 'yearly';
+          } else if (price.recurring?.interval === 'month') {
+            billingCycle = 'monthly';
+          }
+          // Use the product name as plan name if available
+          if (price.product && typeof price.product !== 'string') {
+            planName = price.product.name || planName;
+          } else if (typeof price.product === 'string') {
+            const product = await stripe.products.retrieve(price.product);
+            planName = product.name || planName;
+          }
+        }
+      }
+    } catch (priceErr) {
+      console.error('Failed to fetch price details, using defaults:', priceErr);
+    }
 
     // Mark the invite token as used
     const { error: tokenUpdateError } = await supabase
@@ -159,16 +197,24 @@ async function handleInviteCompletion(pendingClientId: string, inviteTokenValue:
       console.info(`Marked invite token as used for client ${pendingClientId}`);
     }
 
-    // Update pending client status to completed
+    // Update pending client: save Stripe customer ID + plan details, set status to completed
     const { error: clientUpdateError } = await supabase
       .from('pending_clients')
-      .update({ status: 'completed', updated_at: new Date().toISOString() })
+      .update({
+        status: 'completed',
+        stripe_customer_id: customerId,
+        plan_name: planName,
+        plan_amount: planAmount,
+        plan_currency: planCurrency,
+        billing_cycle: billingCycle,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', pendingClientId);
 
     if (clientUpdateError) {
-      console.error('Failed to update pending client status:', clientUpdateError);
+      console.error('Failed to update pending client:', clientUpdateError);
     } else {
-      console.info(`Updated pending client ${pendingClientId} status to completed`);
+      console.info(`Updated pending client ${pendingClientId} with Stripe data and status completed`);
     }
   } catch (error) {
     console.error(`Failed to handle invite completion for client ${pendingClientId}:`, error);

@@ -121,10 +121,15 @@ export type PendingClient = {
   full_name: string;
   email: string;
   notes: string | null;
-  status: 'pending' | 'invited' | 'completed';
+  status: 'pending' | 'invited' | 'completed' | 'activated';
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  stripe_customer_id: string | null;
+  plan_name: string | null;
+  plan_amount: number | null;
+  plan_currency: string | null;
+  billing_cycle: string | null;
 };
 
 export type InviteToken = {
