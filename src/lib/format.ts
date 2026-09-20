@@ -1,6 +1,6 @@
 export function formatCurrency(amount: number, currency = 'GBP'): string {
   const code = currency.toUpperCase();
-  const symbol = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : '$';
+  const symbol = code === 'GBP' ? '£' : code === 'EUR' ? '€' : '$';
   return `${symbol}${amount.toFixed(2)}`;
 }
 
