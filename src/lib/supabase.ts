@@ -130,6 +130,7 @@ export type PendingClient = {
   plan_amount: number | null;
   plan_currency: string | null;
   billing_cycle: string | null;
+  website_url: string | null;
 };
 
 export type InviteToken = {

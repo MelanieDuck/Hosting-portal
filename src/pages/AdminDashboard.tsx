@@ -55,6 +55,7 @@ export function AdminDashboardPage({
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
   const [formNotes, setFormNotes] = useState('');
+  const [formWebsiteUrl, setFormWebsiteUrl] = useState('');
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState('');
 
@@ -180,6 +181,7 @@ export function AdminDashboardPage({
           full_name: formName.trim(),
           email: formEmail.trim(),
           notes: formNotes.trim() || null,
+          website_url: formWebsiteUrl.trim() || null,
           status: 'invited',
           created_by: user.id,
         })
@@ -206,6 +208,7 @@ export function AdminDashboardPage({
       setFormName('');
       setFormEmail('');
       setFormNotes('');
+      setFormWebsiteUrl('');
       await loadData();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to add client';
@@ -630,6 +633,13 @@ export function AdminDashboardPage({
               className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent resize-none"
             />
           </div>
+          <Input
+            label="Website Address (optional)"
+            type="url"
+            value={formWebsiteUrl}
+            onChange={(e) => setFormWebsiteUrl(e.target.value)}
+            placeholder="https://clientsite.com"
+          />
           {addError && (
             <div className="flex items-center gap-3 p-3 rounded-lg bg-red-50 border border-red-200">
               <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />

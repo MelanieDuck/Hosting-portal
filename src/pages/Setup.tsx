@@ -68,21 +68,21 @@ export function SetupPage() {
         return;
       }
 
-      if (data.token_used && status !== 'success') {
+      if (result.token_used && status !== 'success') {
         setTokenState('used');
         return;
       }
 
-      if (data.token_expired) {
+      if (result.token_expired) {
         setTokenState('expired');
         return;
       }
 
       setClient({
-        id: data.client_id,
-        full_name: data.full_name,
-        email: data.email,
-        notes: data.notes,
+        id: result.client_id,
+        full_name: result.full_name,
+        email: result.email,
+        notes: result.notes,
       } as PendingClient);
       setToken({ token: tokenValue } as InviteToken);
       setTokenState('valid');
