@@ -13,6 +13,7 @@ import {
   Mail,
   Loader2,
   ExternalLink,
+  Trash2,
 } from 'lucide-react';
 import {
   supabase,
@@ -66,6 +67,11 @@ export function AdminDashboardPage({
 
   // Copy feedback per-row
   const [copiedRow, setCopiedRow] = useState<string | null>(null);
+
+  // Delete pending client confirmation
+  const [deleteTarget, setDeleteTarget] = useState<PendingClient | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   const loadData = useCallback(async () => {
     const [profilesRes] = await Promise.all([
@@ -246,6 +252,36 @@ export function AdminDashboardPage({
     }
   };
 
+  const handleDeletePending = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      // First invalidate any unused tokens for this client
+      await supabase
+        .from('invite_tokens')
+        .update({ used_at: new Date().toISOString() })
+        .eq('client_id', deleteTarget.id)
+        .is('used_at', null);
+
+      // Then delete the pending client (tokens cascade via FK)
+      const { error } = await supabase
+        .from('pending_clients')
+        .delete()
+        .eq('id', deleteTarget.id);
+
+      if (error) throw error;
+
+      setDeleteTarget(null);
+      await loadData();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete invitation';
+      setDeleteError(msg);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleRegenerateToken = async (clientId: string) => {
     if (!user) return;
     // Expire old tokens by setting used_at (they're not actually used, but this invalidates them)
@@ -394,6 +430,15 @@ export function AdminDashboardPage({
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setDeleteTarget(row.client)}
+                      className="text-slate-400 hover:text-red-600 hover:bg-red-50"
+                      aria-label="Delete invitation"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
                     {link && !isExpired && (
                       <Button
                         variant="outline"
@@ -717,6 +762,53 @@ export function AdminDashboardPage({
           <div className="flex justify-end">
             <Button onClick={() => setSuccessOpen(false)}>
               Done
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete Pending Client Modal */}
+      <Modal
+        open={deleteTarget !== null}
+        onClose={() => { setDeleteTarget(null); setDeleteError(''); }}
+        title="Delete Invitation"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-4 rounded-lg bg-red-50 border border-red-200">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-red-900">
+                Delete this pending invitation?
+              </p>
+              <p className="text-sm text-red-700 mt-1">
+                This will permanently remove{' '}
+                <span className="font-semibold">{deleteTarget?.full_name}</span>{' '}
+                ({deleteTarget?.email}) and invalidate their invite link. This cannot be undone.
+              </p>
+            </div>
+          </div>
+          {deleteError && (
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-red-50 border border-red-200">
+              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+              <p className="text-sm text-red-700">{deleteError}</p>
+            </div>
+          )}
+          <div className="flex gap-3 justify-end">
+            <Button
+              variant="outline"
+              onClick={() => { setDeleteTarget(null); setDeleteError(''); }}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              loading={deleting}
+              onClick={handleDeletePending}
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete Invitation
             </Button>
           </div>
         </div>

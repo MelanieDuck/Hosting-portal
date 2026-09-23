@@ -11,14 +11,16 @@ import { BackupsPage } from '@/pages/Backups';
 import { AdminDashboardPage } from '@/pages/AdminDashboard';
 import { AdminClientDetailPage } from '@/pages/AdminClientDetail';
 import { SetupPage } from '@/pages/Setup';
+import { LandingPage } from '@/pages/Landing';
 import { Spinner } from '@/components/ui';
 
-function getRouteFromHash(): { page: PageKey; auth: 'login' | 'signup' | null; isSetup: boolean } {
+function getRouteFromHash(): { page: PageKey; auth: 'login' | 'signup' | null; isSetup: boolean; isLanding: boolean } {
   let hash = window.location.hash.slice(1);
    if (hash.startsWith('/')) hash = hash.slice(1); 
-  if (hash === 'login') return { page: 'dashboard', auth: 'login', isSetup: false };
-  if (hash === 'signup') return { page: 'dashboard', auth: 'signup', isSetup: false };
-  if (hash.startsWith('setup')) return { page: 'dashboard', auth: null, isSetup: true };
+  if (hash === '') return { page: 'dashboard', auth: null, isSetup: false, isLanding: true };
+  if (hash === 'login') return { page: 'dashboard', auth: 'login', isSetup: false, isLanding: false };
+  if (hash === 'signup') return { page: 'dashboard', auth: 'signup', isSetup: false, isLanding: false };
+  if (hash.startsWith('setup')) return { page: 'dashboard', auth: null, isSetup: true, isLanding: false };
   const validPages: PageKey[] = [
     'dashboard',
     'subscription',
@@ -27,9 +29,9 @@ function getRouteFromHash(): { page: PageKey; auth: 'login' | 'signup' | null; i
     'backups',
   ];
   if (validPages.includes(hash as PageKey)) {
-    return { page: hash as PageKey, auth: null, isSetup: false };
+    return { page: hash as PageKey, auth: null, isSetup: false, isLanding: false };
   }
-  return { page: 'dashboard', auth: null, isSetup: false };
+  return { page: 'dashboard', auth: null, isSetup: false, isLanding: true };
 }
 
 function AppContent() {
@@ -39,18 +41,21 @@ function AppContent() {
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'signup' | null>(null);
   const [isSetup, setIsSetup] = useState(false);
+  const [isLanding, setIsLanding] = useState(false);
 
   useEffect(() => {
     const route = getRouteFromHash();
     setCurrentPage(route.page);
     setAuthMode(route.auth);
     setIsSetup(route.isSetup);
+    setIsLanding(route.isLanding);
 
     const handleHashChange = () => {
       const r = getRouteFromHash();
       setCurrentPage(r.page);
       setAuthMode(r.auth);
       setIsSetup(r.isSetup);
+      setIsLanding(r.isLanding);
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
@@ -71,6 +76,7 @@ function AppContent() {
   }
 
   if (!session) {
+    if (isLanding) return <LandingPage />;
     const mode = authMode === 'signup' ? 'signup' : 'login';
     return <AuthPage mode={mode} />;
   }
