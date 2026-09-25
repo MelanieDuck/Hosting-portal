@@ -17,7 +17,6 @@ const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPAB
 
 Deno.serve(async (req) => {
   try {
-    // Handle OPTIONS request for CORS preflight
     if (req.method === 'OPTIONS') {
       return new Response(null, { status: 204 });
     }
@@ -26,17 +25,14 @@ Deno.serve(async (req) => {
       return new Response('Method not allowed', { status: 405 });
     }
 
-    // get the signature from the header
     const signature = req.headers.get('stripe-signature');
 
     if (!signature) {
       return new Response('No signature found', { status: 400 });
     }
 
-    // get the raw body
     const body = await req.text();
 
-    // verify the webhook signature
     let event: Stripe.Event;
 
     try {
@@ -46,7 +42,11 @@ Deno.serve(async (req) => {
       return new Response(`Webhook signature verification failed: ${error.message}`, { status: 400 });
     }
 
-    EdgeRuntime.waitUntil(handleEvent(event));
+    if (event.type === 'invoice.payment_succeeded') {
+      EdgeRuntime.waitUntil(handleInvoicePaymentSucceeded(event.data.object as Stripe.Invoice));
+    } else {
+      EdgeRuntime.waitUntil(handleEvent(event));
+    }
 
     return Response.json({ received: true });
   } catch (error: any) {
@@ -66,7 +66,6 @@ async function handleEvent(event: Stripe.Event) {
     return;
   }
 
-  // for one time payments, we only listen for the checkout.session.completed event
   if (event.type === 'payment_intent.succeeded' && event.data.object.invoice === null) {
     return;
   }
@@ -80,15 +79,12 @@ async function handleEvent(event: Stripe.Event) {
 
     if (event.type === 'checkout.session.completed') {
       const { mode } = stripeData as Stripe.Checkout.Session;
-
       isSubscription = mode === 'subscription';
-
       console.info(`Processing ${isSubscription ? 'subscription' : 'one-time payment'} checkout session`);
     }
 
     const { mode, payment_status } = stripeData as Stripe.Checkout.Session;
 
-    // Check for invite flow metadata
     const metadata = (stripeData as Stripe.Checkout.Session).metadata;
     const pendingClientId = metadata?.pending_client_id;
     const inviteToken = metadata?.invite_token;
@@ -97,14 +93,12 @@ async function handleEvent(event: Stripe.Event) {
       console.info(`Starting subscription sync for customer: ${customerId}`);
       await syncCustomerFromStripe(customerId);
 
-      // If this was an invite flow checkout, mark the token as used and update pending client
       if (pendingClientId && inviteToken && payment_status === 'paid') {
         const session = stripeData as Stripe.Checkout.Session;
         await handleInviteCompletion(pendingClientId, inviteToken, customerId, session);
       }
     } else if (mode === 'payment' && payment_status === 'paid') {
       try {
-        // Extract the necessary information from the session
         const {
           id: checkout_session_id,
           payment_intent,
@@ -113,7 +107,6 @@ async function handleEvent(event: Stripe.Event) {
           currency,
         } = stripeData as Stripe.Checkout.Session;
 
-        // Insert the order into the stripe_orders table
         const { error: orderError } = await supabase.from('stripe_orders').insert({
           checkout_session_id,
           payment_intent_id: payment_intent,
@@ -122,7 +115,7 @@ async function handleEvent(event: Stripe.Event) {
           amount_total,
           currency,
           payment_status,
-          status: 'completed', // assuming we want to mark it as completed since payment is successful
+          status: 'completed',
         });
 
         if (orderError) {
@@ -131,7 +124,6 @@ async function handleEvent(event: Stripe.Event) {
         }
         console.info(`Successfully processed one-time payment for session: ${checkout_session_id}`);
 
-        // Also handle invite completion for one-time payments
         if (pendingClientId && inviteToken) {
           const session = stripeData as Stripe.Checkout.Session;
           await handleInviteCompletion(pendingClientId, inviteToken, customerId, session);
@@ -152,11 +144,11 @@ async function handleInviteCompletion(
   try {
     console.info(`Processing invite completion for client ${pendingClientId}`);
 
-    // Extract plan details from the checkout session's line items / price
     let planName = 'Hosting Plan';
     let planAmount: number | null = null;
     let planCurrency: string | null = null;
     let billingCycle = 'monthly';
+    let invoiceUrl: string | null = null;
 
     try {
       const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 1 });
@@ -170,7 +162,6 @@ async function handleInviteCompletion(
           } else if (price.recurring?.interval === 'month') {
             billingCycle = 'monthly';
           }
-          // Use the product name as plan name if available
           if (price.product && typeof price.product !== 'string') {
             planName = price.product.name || planName;
           } else if (typeof price.product === 'string') {
@@ -183,7 +174,15 @@ async function handleInviteCompletion(
       console.error('Failed to fetch price details, using defaults:', priceErr);
     }
 
-    // Mark the invite token as used
+    if (session.invoice && typeof session.invoice === 'string') {
+      try {
+        const invoice = await stripe.invoices.retrieve(session.invoice);
+        invoiceUrl = invoice.hosted_invoice_url ?? null;
+      } catch (invErr) {
+        console.error('Failed to fetch invoice for session:', invErr);
+      }
+    }
+
     const { error: tokenUpdateError } = await supabase
       .from('invite_tokens')
       .update({ used_at: new Date().toISOString() })
@@ -197,7 +196,6 @@ async function handleInviteCompletion(
       console.info(`Marked invite token as used for client ${pendingClientId}`);
     }
 
-    // Update pending client: save Stripe customer ID + plan details, set status to completed
     const { error: clientUpdateError } = await supabase
       .from('pending_clients')
       .update({
@@ -208,6 +206,7 @@ async function handleInviteCompletion(
         plan_currency: planCurrency,
         billing_cycle: billingCycle,
         updated_at: new Date().toISOString(),
+        invoice_url: invoiceUrl,
       })
       .eq('id', pendingClientId);
 
@@ -221,10 +220,8 @@ async function handleInviteCompletion(
   }
 }
 
-// based on the excellent https://github.com/t3dotgg/stripe-recommendations
 async function syncCustomerFromStripe(customerId: string) {
   try {
-    // fetch latest subscription data from Stripe
     const subscriptions = await stripe.subscriptions.list({
       customer: customerId,
       limit: 1,
@@ -232,7 +229,6 @@ async function syncCustomerFromStripe(customerId: string) {
       expand: ['data.default_payment_method'],
     });
 
-    // TODO verify if needed
     if (subscriptions.data.length === 0) {
       console.info(`No active subscriptions found for customer: ${customerId}`);
       const { error: noSubError } = await supabase.from('stripe_subscriptions').upsert(
@@ -251,10 +247,8 @@ async function syncCustomerFromStripe(customerId: string) {
       }
     }
 
-    // assumes that a customer can only have a single subscription
     const subscription = subscriptions.data[0];
 
-    // store subscription state
     const { error: subError } = await supabase.from('stripe_subscriptions').upsert(
       {
         customer_id: customerId,
@@ -287,3 +281,71 @@ async function syncCustomerFromStripe(customerId: string) {
   }
 }
 
+async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
+  try {
+    const customerId = invoice.customer as string;
+    if (!customerId) return;
+
+    const { data: customerRow } = await supabase
+      .from('stripe_customers')
+      .select('user_id')
+      .eq('customer_id', customerId)
+      .maybeSingle();
+
+    if (!customerRow) {
+      console.error(`No matching user for Stripe customer ${customerId}`);
+      return;
+    }
+
+    const { data: subRow } = await supabase
+      .from('subscriptions')
+      .select('id')
+      .eq('user_id', customerRow.user_id)
+      .maybeSingle();
+
+    const { data: existing } = await supabase
+      .from('payments')
+      .select('id')
+      .eq('invoice_number', invoice.number ?? invoice.id)
+      .maybeSingle();
+
+    if (existing) {
+      console.info(`Payment already recorded for invoice ${invoice.id}`);
+      return;
+    }
+
+    const { error: paymentError } = await supabase.from('payments').insert({
+      user_id: customerRow.user_id,
+      subscription_id: subRow?.id ?? null,
+      amount: invoice.amount_paid / 100,
+      currency: invoice.currency,
+      status: 'succeeded',
+      payment_date: new Date(invoice.status_transitions.paid_at! * 1000).toISOString(),
+      invoice_number: invoice.number,
+      invoice_url: invoice.hosted_invoice_url,
+      description: 'Subscription renewal payment',
+      is_one_off: false,
+    });
+
+    if (paymentError) {
+      console.error('Failed to insert payment record:', paymentError);
+      return;
+    }
+
+    if (subRow && invoice.lines.data[0]?.period?.end) {
+      await supabase
+        .from('subscriptions')
+        .update({
+          next_payment_date: new Date(invoice.lines.data[0].period.end * 1000)
+            .toISOString()
+            .split('T')[0],
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', subRow.id);
+    }
+
+    console.info(`Recorded payment for invoice ${invoice.id}, user ${customerRow.user_id}`);
+  } catch (error) {
+    console.error('Failed to handle invoice.payment_succeeded:', error);
+  }
+}
