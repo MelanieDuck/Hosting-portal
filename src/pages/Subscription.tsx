@@ -61,55 +61,72 @@ export function SubscriptionPage() {
     loadData();
   }, [user]);
 
-  const handleCancel = async () => {
-    if (!subscription || !user) return;
-    setCancelling(true);
-    setError('');
-    try {
-      const { error: updateError } = await supabase
-        .from('subscriptions')
-        .update({
-          status: 'cancelled',
-          cancelled_at: new Date().toISOString(),
-        })
-        .eq('id', subscription.id);
-
-      if (updateError) throw updateError;
-
-      const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-cancellation-email`;
-      const res = await fetch(fnUrl, {
+ const handleCancel = async () => {
+  if (!subscription || !user || !session) return;
+  setCancelling(true);
+  setError('');
+  try {
+    // 1. Actually cancel in Stripe first — this is the critical new step
+    const cancelRes = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/cancel-subscription`,
+      {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({
-          user_id: user.id,
-          email: user.email,
-          full_name: user.user_metadata?.full_name || user.email,
-          plan_name: subscription.plan_name,
-          website_url: '',
-        }),
-      });
-      if (!res.ok) {
-        console.warn('Cancellation email notification may not have been sent');
-      }
+      },
+    );
+    const cancelData = await cancelRes.json();
+    if (!cancelRes.ok) {
+      throw new Error(cancelData.error || 'Failed to cancel subscription with Stripe');
+    }
 
-      setSubscription({
-        ...subscription,
+    // 2. Only update our own database once Stripe has confirmed the cancellation
+    const { error: updateError } = await supabase
+      .from('subscriptions')
+      .update({
         status: 'cancelled',
         cancelled_at: new Date().toISOString(),
-      });
-      setSuccess(true);
-      setCancelConfirmOpen(false);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to cancel subscription';
-      setError(msg);
-    } finally {
-      setCancelling(false);
-    }
-  };
+      })
+      .eq('id', subscription.id);
 
+    if (updateError) throw updateError;
+
+    // 3. Notify the team by email, as before
+    const fnUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-cancellation-email`;
+    const res = await fetch(fnUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({
+        user_id: user.id,
+        email: user.email,
+        full_name: user.user_metadata?.full_name || user.email,
+        plan_name: subscription.plan_name,
+        website_url: '',
+      }),
+    });
+    if (!res.ok) {
+      console.warn('Cancellation email notification may not have been sent');
+    }
+
+    setSubscription({
+      ...subscription,
+      status: 'cancelled',
+      cancelled_at: new Date().toISOString(),
+    });
+    setSuccess(true);
+    setCancelConfirmOpen(false);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to cancel subscription';
+    setError(msg);
+  } finally {
+    setCancelling(false);
+  }
+};
   const handleCheckout = async (mode: 'subscription' | 'payment') => {
     setCheckoutLoading(true);
     setCheckoutError('');
