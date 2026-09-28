@@ -275,6 +275,34 @@ async function syncCustomerFromStripe(customerId: string) {
       throw new Error('Failed to sync subscription in database');
     }
     console.info(`Successfully synced subscription for customer: ${customerId}`);
+
+    // Keep our own subscriptions table in sync with Stripe's real status
+    const { data: customerRow } = await supabase
+      .from('stripe_customers')
+      .select('user_id')
+      .eq('customer_id', customerId)
+      .maybeSingle();
+
+    if (customerRow) {
+      const mappedStatus =
+        subscription.status === 'active' || subscription.status === 'trialing'
+          ? 'active'
+          : subscription.status === 'past_due' || subscription.status === 'unpaid'
+          ? 'past_due'
+          : 'cancelled';
+
+      await supabase
+        .from('subscriptions')
+        .update({
+          status: mappedStatus,
+          cancelled_at: mappedStatus === 'cancelled' ? new Date().toISOString() : null,
+          next_payment_date: subscription.current_period_end
+            ? new Date(subscription.current_period_end * 1000).toISOString().split('T')[0]
+            : null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', customerRow.user_id);
+    }
   } catch (error) {
     console.error(`Failed to sync subscription for customer ${customerId}:`, error);
     throw error;
