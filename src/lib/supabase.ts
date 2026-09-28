@@ -34,6 +34,7 @@ export type Payment = {
   currency: string;
   status: 'succeeded' | 'failed' | 'pending' | 'refunded';
   payment_date: string;
+  invoice_url: string | null;
   invoice_number: string | null;
   payment_method_label: string | null;
   description: string | null;

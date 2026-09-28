@@ -345,9 +345,19 @@ export function AdminClientDetailPage({ userId }: { userId: string }) {
                   const cfg = statusConfig[payment.status] ?? statusConfig.pending;
                   return (
                     <tr key={payment.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
-                      <td className="px-6 py-4 text-sm font-medium text-slate-900">
-                        {payment.invoice_number || '—'}
-                      </td>
+              <td className="px-6 py-4 text-sm font-medium text-slate-900">
+  {payment.invoice_number || '—'}
+  {payment.invoice_url && (
+    
+      href={payment.invoice_url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="block text-xs font-medium text-blue-600 hover:text-blue-800 mt-1"
+    >
+      View invoice
+    </a>
+  )}
+</td>
                       <td className="px-6 py-4 text-sm text-slate-600">
                         {formatDate(payment.payment_date)}
                       </td>

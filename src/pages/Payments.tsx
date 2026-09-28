@@ -104,19 +104,29 @@ export function PaymentsPage() {
                         key={payment.id}
                         className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50 transition-colors"
                       >
-                        <td className="px-6 py-4">
-                          <p className="text-sm font-medium text-slate-900">
-                            {payment.invoice_number || '—'}
-                          </p>
-                          {payment.description && (
-                            <p className="text-xs text-slate-400 mt-0.5">
-                              {payment.description}
-                            </p>
-                          )}
-                        </td>
+   
+<td className="px-6 py-4">
+  <p className="text-sm font-medium text-slate-900">
+    {payment.invoice_number || '—'}
+  </p>
+  {payment.description && (
+    <p className="text-xs text-slate-400 mt-0.5">
+      {payment.description}
+    </p>
+  )}
+  {payment.invoice_url && (
+    <a href={payment.invoice_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800 mt-1">
+      <Download className="w-3 h-3" />
+      View invoice
+    </a>
+  )}
+</td>
+ 
+                        
                         <td className="px-6 py-4 text-sm text-slate-600">
                           {formatDate(payment.payment_date)}
                         </td>
+                        
                         <td className="px-6 py-4 text-sm text-slate-600">
                           {payment.payment_method_label || '—'}
                         </td>
@@ -152,6 +162,16 @@ export function PaymentsPage() {
                         <p className="text-xs text-slate-400 mt-0.5">
                           {formatDate(payment.payment_date)}
                         </p>
+
+{payment.invoice_url && (
+  <a href={payment.invoice_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 mt-1">
+    <Download className="w-3 h-3" />
+    View invoice
+  </a>
+)}
+      
+                        
+                        
                       </div>
                       <span className="text-sm font-semibold text-slate-900">
                         {formatCurrency(payment.amount, payment.currency)}
