@@ -13,6 +13,8 @@ import { AdminClientDetailPage } from '@/pages/AdminClientDetail';
 import { SetupPage } from '@/pages/Setup';
 import { LandingPage } from '@/pages/Landing';
 import { Spinner } from '@/components/ui';
+import { supabase } from '@/lib/supabase';
+import { ResetPasswordForm } from '@/pages/ResetPasswordForm';
 
 function getRouteFromHash(): { page: PageKey; auth: 'login' | 'signup' | null; isSetup: boolean; isLanding: boolean } {
   let hash = window.location.hash.slice(1);
@@ -42,7 +44,17 @@ function AppContent() {
   const [authMode, setAuthMode] = useState<'login' | 'signup' | null>(null);
   const [isSetup, setIsSetup] = useState(false);
   const [isLanding, setIsLanding] = useState(false);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
 
+    useEffect(() => {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      setPasswordRecovery(true);
+    }
+  });
+  return () => subscription.unsubscribe();
+}, []);
+  
   useEffect(() => {
     const route = getRouteFromHash();
     setCurrentPage(route.page);
@@ -74,6 +86,10 @@ function AppContent() {
   if (isSetup) {
     return <SetupPage />;
   }
+  
+  if (passwordRecovery) {
+  return <ResetPasswordForm />;
+}
 
   if (!session) {
     if (isLanding) return <LandingPage />;
