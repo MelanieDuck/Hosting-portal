@@ -292,15 +292,25 @@ async function handleInviteCheckout(
 
   // Create checkout session with metadata for webhook matching
   const checkoutMode: 'payment' | 'subscription' = mode === 'payment' ? 'payment' : 'subscription';
-  const session = await stripe.checkout.sessions.create({
+  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+  {
+    price: priceId,
+    quantity: 1,
+  },
+];
+
+const setupFeePriceId = Deno.env.get('STRIPE_SETUP_FEE_PRICE_ID');
+if (setupFeePriceId && checkoutMode === 'subscription') {
+  lineItems.push({
+    price: setupFeePriceId,
+    quantity: 1,
+  });
+}
+
+const session = await stripe.checkout.sessions.create({
     customer: newCustomer.id,
     payment_method_types: ['card'],
-    line_items: [
-      {
-        price: priceId,
-        quantity: 1,
-      },
-    ],
+    line_items: lineItems,
     mode: checkoutMode,
     success_url: successUrl,
     cancel_url: cancelUrl,

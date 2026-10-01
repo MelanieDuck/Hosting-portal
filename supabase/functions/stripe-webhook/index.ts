@@ -3,7 +3,7 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 // Handles subscription sync, one-time payments, and invite flow completion
 import Stripe from 'npm:stripe@17.7.0';
 import { createClient } from 'npm:@supabase/supabase-js@2.49.1';
-
+ 
 const stripeSecret = Deno.env.get('STRIPE_SECRET_KEY')!;
 const stripeWebhookSecret = Deno.env.get('STRIPE_WEBHOOK_SECRET')!;
 const stripe = new Stripe(stripeSecret, {
@@ -12,87 +12,87 @@ const stripe = new Stripe(stripeSecret, {
     version: '1.0.0',
   },
 });
-
+ 
 const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-
+ 
 Deno.serve(async (req) => {
   try {
     if (req.method === 'OPTIONS') {
       return new Response(null, { status: 204 });
     }
-
+ 
     if (req.method !== 'POST') {
       return new Response('Method not allowed', { status: 405 });
     }
-
+ 
     const signature = req.headers.get('stripe-signature');
-
+ 
     if (!signature) {
       return new Response('No signature found', { status: 400 });
     }
-
+ 
     const body = await req.text();
-
+ 
     let event: Stripe.Event;
-
+ 
     try {
       event = await stripe.webhooks.constructEventAsync(body, signature, stripeWebhookSecret);
     } catch (error: any) {
       console.error(`Webhook signature verification failed: ${error.message}`);
       return new Response(`Webhook signature verification failed: ${error.message}`, { status: 400 });
     }
-
+ 
     if (event.type === 'invoice.payment_succeeded') {
       EdgeRuntime.waitUntil(handleInvoicePaymentSucceeded(event.data.object as Stripe.Invoice));
     } else {
       EdgeRuntime.waitUntil(handleEvent(event));
     }
-
+ 
     return Response.json({ received: true });
   } catch (error: any) {
     console.error('Error processing webhook:', error);
     return Response.json({ error: error.message }, { status: 500 });
   }
 });
-
+ 
 async function handleEvent(event: Stripe.Event) {
   const stripeData = event?.data?.object ?? {};
-
+ 
   if (!stripeData) {
     return;
   }
-
+ 
   if (!('customer' in stripeData)) {
     return;
   }
-
+ 
   if (event.type === 'payment_intent.succeeded' && event.data.object.invoice === null) {
     return;
   }
-
+ 
   const { customer: customerId } = stripeData;
-
+ 
   if (!customerId || typeof customerId !== 'string') {
     console.error(`No customer received on event: ${JSON.stringify(event)}`);
   } else {
     let isSubscription = true;
-
+ 
     if (event.type === 'checkout.session.completed') {
       const { mode } = stripeData as Stripe.Checkout.Session;
       isSubscription = mode === 'subscription';
       console.info(`Processing ${isSubscription ? 'subscription' : 'one-time payment'} checkout session`);
     }
-
+ 
     const { mode, payment_status } = stripeData as Stripe.Checkout.Session;
-
+ 
     const metadata = (stripeData as Stripe.Checkout.Session).metadata;
     const pendingClientId = metadata?.pending_client_id;
     const inviteToken = metadata?.invite_token;
-
+ 
     if (isSubscription) {
       console.info(`Starting subscription sync for customer: ${customerId}`);
       await syncCustomerFromStripe(customerId);
-
+ 
       if (pendingClientId && inviteToken && payment_status === 'paid') {
         const session = stripeData as Stripe.Checkout.Session;
         await handleInviteCompletion(pendingClientId, inviteToken, customerId, session);
@@ -106,7 +106,7 @@ async function handleEvent(event: Stripe.Event) {
           amount_total,
           currency,
         } = stripeData as Stripe.Checkout.Session;
-
+ 
         const { error: orderError } = await supabase.from('stripe_orders').insert({
           checkout_session_id,
           payment_intent_id: payment_intent,
@@ -117,13 +117,13 @@ async function handleEvent(event: Stripe.Event) {
           payment_status,
           status: 'completed',
         });
-
+ 
         if (orderError) {
           console.error('Error inserting order:', orderError);
           return;
         }
         console.info(`Successfully processed one-time payment for session: ${checkout_session_id}`);
-
+ 
         if (pendingClientId && inviteToken) {
           const session = stripeData as Stripe.Checkout.Session;
           await handleInviteCompletion(pendingClientId, inviteToken, customerId, session);
@@ -134,7 +134,7 @@ async function handleEvent(event: Stripe.Event) {
     }
   }
 }
-
+ 
 async function handleInviteCompletion(
   pendingClientId: string,
   inviteTokenValue: string,
@@ -143,18 +143,21 @@ async function handleInviteCompletion(
 ) {
   try {
     console.info(`Processing invite completion for client ${pendingClientId}`);
-
+ 
     let planName = 'Hosting Plan';
     let planAmount: number | null = null;
     let planCurrency: string | null = null;
     let billingCycle = 'monthly';
     let invoiceUrl: string | null = null;
-
+ 
     try {
-      const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 1 });
-      if (lineItems.data.length > 0) {
-        const price = lineItems.data[0].price;
-        if (price) {
+ const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
+if (lineItems.data.length > 0) {
+  // Pick out the recurring item specifically, ignoring any one-time add-on like a setup fee
+  const recurringItem = lineItems.data.find((li) => li.price?.recurring) ?? lineItems.data[0];
+  const price = recurringItem.price;
+  if (price) {
+    
           planAmount = price.unit_amount ? price.unit_amount / 100 : null;
           planCurrency = price.currency;
           if (price.recurring?.interval === 'year') {
@@ -173,7 +176,7 @@ async function handleInviteCompletion(
     } catch (priceErr) {
       console.error('Failed to fetch price details, using defaults:', priceErr);
     }
-
+ 
     if (session.invoice && typeof session.invoice === 'string') {
       try {
         const invoice = await stripe.invoices.retrieve(session.invoice);
@@ -182,20 +185,20 @@ async function handleInviteCompletion(
         console.error('Failed to fetch invoice for session:', invErr);
       }
     }
-
+ 
     const { error: tokenUpdateError } = await supabase
       .from('invite_tokens')
       .update({ used_at: new Date().toISOString() })
       .eq('token', inviteTokenValue)
       .eq('client_id', pendingClientId)
       .is('used_at', null);
-
+ 
     if (tokenUpdateError) {
       console.error('Failed to mark invite token as used:', tokenUpdateError);
     } else {
       console.info(`Marked invite token as used for client ${pendingClientId}`);
     }
-
+ 
     const { error: clientUpdateError } = await supabase
       .from('pending_clients')
       .update({
@@ -207,9 +210,10 @@ async function handleInviteCompletion(
         billing_cycle: billingCycle,
         updated_at: new Date().toISOString(),
         invoice_url: invoiceUrl,
+        first_payment_total: session.amount_total ? session.amount_total / 100 : planAmount,
       })
       .eq('id', pendingClientId);
-
+ 
     if (clientUpdateError) {
       console.error('Failed to update pending client:', clientUpdateError);
     } else {
@@ -219,7 +223,7 @@ async function handleInviteCompletion(
     console.error(`Failed to handle invite completion for client ${pendingClientId}:`, error);
   }
 }
-
+ 
 async function syncCustomerFromStripe(customerId: string) {
   try {
     const subscriptions = await stripe.subscriptions.list({
@@ -228,7 +232,7 @@ async function syncCustomerFromStripe(customerId: string) {
       status: 'all',
       expand: ['data.default_payment_method'],
     });
-
+ 
     if (subscriptions.data.length === 0) {
       console.info(`No active subscriptions found for customer: ${customerId}`);
       const { error: noSubError } = await supabase.from('stripe_subscriptions').upsert(
@@ -240,15 +244,15 @@ async function syncCustomerFromStripe(customerId: string) {
           onConflict: 'customer_id',
         },
       );
-
+ 
       if (noSubError) {
         console.error('Error updating subscription status:', noSubError);
         throw new Error('Failed to update subscription status in database');
       }
     }
-
+ 
     const subscription = subscriptions.data[0];
-
+ 
     const { error: subError } = await supabase.from('stripe_subscriptions').upsert(
       {
         customer_id: customerId,
@@ -269,20 +273,20 @@ async function syncCustomerFromStripe(customerId: string) {
         onConflict: 'customer_id',
       },
     );
-
+ 
     if (subError) {
       console.error('Error syncing subscription:', subError);
       throw new Error('Failed to sync subscription in database');
     }
     console.info(`Successfully synced subscription for customer: ${customerId}`);
-
+ 
     // Keep our own subscriptions table in sync with Stripe's real status
     const { data: customerRow } = await supabase
       .from('stripe_customers')
       .select('user_id')
       .eq('customer_id', customerId)
       .maybeSingle();
-
+ 
     if (customerRow) {
       const mappedStatus =
         subscription.status === 'active' || subscription.status === 'trialing'
@@ -290,7 +294,7 @@ async function syncCustomerFromStripe(customerId: string) {
           : subscription.status === 'past_due' || subscription.status === 'unpaid'
           ? 'past_due'
           : 'cancelled';
-
+ 
       await supabase
         .from('subscriptions')
         .update({
@@ -308,40 +312,40 @@ async function syncCustomerFromStripe(customerId: string) {
     throw error;
   }
 }
-
+ 
 async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
   try {
     const customerId = invoice.customer as string;
     if (!customerId) return;
-
+ 
     const { data: customerRow } = await supabase
       .from('stripe_customers')
       .select('user_id')
       .eq('customer_id', customerId)
       .maybeSingle();
-
+ 
     if (!customerRow) {
       console.error(`No matching user for Stripe customer ${customerId}`);
       return;
     }
-
+ 
     const { data: subRow } = await supabase
       .from('subscriptions')
       .select('id')
       .eq('user_id', customerRow.user_id)
       .maybeSingle();
-
+ 
     const { data: existing } = await supabase
       .from('payments')
       .select('id')
       .eq('invoice_number', invoice.number ?? invoice.id)
       .maybeSingle();
-
+ 
     if (existing) {
       console.info(`Payment already recorded for invoice ${invoice.id}`);
       return;
     }
-
+ 
     const { error: paymentError } = await supabase.from('payments').insert({
       user_id: customerRow.user_id,
       subscription_id: subRow?.id ?? null,
@@ -354,12 +358,12 @@ async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
       description: 'Subscription renewal payment',
       is_one_off: false,
     });
-
+ 
     if (paymentError) {
       console.error('Failed to insert payment record:', paymentError);
       return;
     }
-
+ 
     if (subRow && invoice.lines.data[0]?.period?.end) {
       await supabase
         .from('subscriptions')
@@ -371,7 +375,7 @@ async function handleInvoicePaymentSucceeded(invoice: Stripe.Invoice) {
         })
         .eq('id', subRow.id);
     }
-
+ 
     console.info(`Recorded payment for invoice ${invoice.id}, user ${customerRow.user_id}`);
   } catch (error) {
     console.error('Failed to handle invoice.payment_succeeded:', error);
