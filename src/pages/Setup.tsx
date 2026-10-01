@@ -470,7 +470,7 @@ function SetupShell({ children }: { children: React.ReactNode }) {
       <div className="max-w-lg w-full">
         <div className="flex flex-col items-center mb-6">
           <Logo className="w-12 h-12 mb-3" />
-          <p className="text-xs text-slate-400">HostPortal Client Setup</p>
+          <p className="text-xs text-slate-400">MyQuickHost Client Setup</p>
         </div>
         <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-8">
           {children}

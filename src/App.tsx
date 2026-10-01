@@ -91,8 +91,9 @@ function AppContent() {
   return <ResetPasswordForm />;
 }
 
+  if (isLanding) return <LandingPage />;
+
   if (!session) {
-    if (isLanding) return <LandingPage />;
     const mode = authMode === 'signup' ? 'signup' : 'login';
     return <AuthPage mode={mode} />;
   }

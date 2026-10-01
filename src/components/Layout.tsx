@@ -50,13 +50,16 @@ export function Layout({
     <div className="min-h-screen bg-slate-50 flex">
       {/* Desktop sidebar */}
       <aside className="hidden md:flex w-64 flex-col bg-white border-r border-slate-200 fixed inset-y-0 left-0 z-30">
-        <div className="flex items-center gap-2.5 px-6 h-16 border-b border-slate-100">
+        <button
+          onClick={() => { window.location.hash = ''; }}
+          className="flex items-center gap-2.5 px-6 h-16 border-b border-slate-100 w-full text-left hover:bg-slate-50 transition-colors"
+        >
           <Logo className="w-9 h-9" />
           <div>
-            <p className="text-sm font-bold text-slate-900">HostPortal</p>
+            <p className="text-sm font-bold text-slate-900">MyQuickHost</p>
             <p className="text-xs text-slate-400">Client Dashboard</p>
           </div>
-        </div>
+        </button>
 
         <nav className="flex-1 px-3 py-4 space-y-1">
           {navItems.map((item) => (
@@ -99,10 +102,13 @@ export function Layout({
 
       {/* Mobile header */}
       <div className="md:hidden fixed top-0 left-0 right-0 z-30 bg-white border-b border-slate-200 h-16 flex items-center justify-between px-4">
-        <div className="flex items-center gap-2.5">
+        <button
+          onClick={() => { window.location.hash = ''; }}
+          className="flex items-center gap-2.5"
+        >
           <Logo className="w-9 h-9" />
-          <span className="text-sm font-bold text-slate-900">HostPortal</span>
-        </div>
+          <span className="text-sm font-bold text-slate-900">MyQuickHost</span>
+        </button>
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
           className="p-2 rounded-lg hover:bg-slate-100"

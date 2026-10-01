@@ -31,7 +31,7 @@ export function AdminLayout({
         <div className="flex items-center gap-2.5 px-6 h-16 border-b border-slate-800">
           <Logo className="w-9 h-9" />
           <div>
-            <p className="text-sm font-bold text-white">HostPortal</p>
+            <p className="text-sm font-bold text-white">MyQuickHost</p>
             <p className="text-xs text-slate-400">Merchant Dashboard</p>
           </div>
         </div>

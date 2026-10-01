@@ -14,6 +14,10 @@ import {
   Receipt,
   AlertCircle,
   Save,
+  Upload,
+  FileArchive,
+  Download,
+  HardDrive,
 } from 'lucide-react';
 import {
   supabase,
@@ -21,9 +25,10 @@ import {
   type Subscription,
   type Payment,
   type ClientNote,
+  type Backup,
 } from '@/lib/supabase';
 import { Card, CardHeader, Badge, Spinner, Button, Modal, Input, Select, EmptyState } from '@/components/ui';
-import { formatCurrency, formatDate, formatDateTime } from '@/lib/format';
+import { formatCurrency, formatDate, formatDateTime, formatFileSize } from '@/lib/format';
 import { useAuth } from '@/lib/auth';
 
 const statusConfig = {
@@ -40,7 +45,12 @@ export function AdminClientDetailPage({ userId }: { userId: string }) {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [notes, setNotes] = useState<ClientNote[]>([]);
+  const [backups, setBackups] = useState<Backup[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Backup upload
+  const [uploadingBackup, setUploadingBackup] = useState(false);
+  const [backupError, setBackupError] = useState('');
 
   // Note form
   const [noteContent, setNoteContent] = useState('');
@@ -62,11 +72,12 @@ export function AdminClientDetailPage({ userId }: { userId: string }) {
   const [savingSub, setSavingSub] = useState(false);
 
   const loadData = async () => {
-    const [profileRes, subRes, paymentsRes, notesRes] = await Promise.all([
+    const [profileRes, subRes, paymentsRes, notesRes, backupsRes] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
       supabase.from('subscriptions').select('*').eq('user_id', userId).maybeSingle(),
       supabase.from('payments').select('*').eq('user_id', userId).order('payment_date', { ascending: false }),
       supabase.from('client_notes').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+      supabase.from('backups').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
     ]);
 
     // Fetch email
@@ -78,6 +89,7 @@ export function AdminClientDetailPage({ userId }: { userId: string }) {
     setSubscription(subRes.data as Subscription | null);
     setPayments(paymentsRes.data as Payment[]);
     setNotes(notesRes.data as ClientNote[]);
+    setBackups(backupsRes.data as Backup[]);
     setLoading(false);
   };
 
@@ -103,6 +115,49 @@ export function AdminClientDetailPage({ userId }: { userId: string }) {
   const handleDeleteNote = async (id: string) => {
     await supabase.from('client_notes').delete().eq('id', id);
     await loadData();
+  };
+
+  const handleUploadBackup = async (file: File) => {
+    if (!file) return;
+    setUploadingBackup(true);
+    setBackupError('');
+    try {
+      const filePath = `${userId}/${Date.now()}-${file.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from('backups')
+        .upload(filePath, file);
+      if (uploadError) throw new Error(uploadError.message);
+
+      const { error: dbError } = await supabase.from('backups').insert({
+        user_id: userId,
+        filename: file.name,
+        file_size: file.size,
+        storage_path: filePath,
+        backup_type: 'full',
+      });
+      if (dbError) throw new Error(dbError.message);
+
+      await loadData();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Upload failed';
+      setBackupError(msg);
+    } finally {
+      setUploadingBackup(false);
+    }
+  };
+
+  const handleDeleteBackup = async (backup: Backup) => {
+    await supabase.storage.from('backups').remove([backup.storage_path]);
+    await supabase.from('backups').delete().eq('id', backup.id);
+    await loadData();
+  };
+
+  const handleDownloadBackup = async (backup: Backup) => {
+    const { data, error: dlError } = await supabase.storage
+      .from('backups')
+      .createSignedUrl(backup.storage_path, 3600);
+    if (dlError || !data) return;
+    window.open(data.signedUrl, '_blank');
   };
 
   const handleAddPayment = async () => {
@@ -439,6 +494,103 @@ export function AdminClientDetailPage({ userId }: { userId: string }) {
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* Backups section */}
+      <Card>
+        <CardHeader
+          title="Website Backups"
+          subtitle="Upload and manage backup files for this client"
+          icon={<HardDrive className="w-5 h-5" />}
+        />
+        <div className="p-6 space-y-4">
+          {backupError && (
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-red-50 border border-red-200">
+              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+              <p className="text-sm text-red-700">{backupError}</p>
+            </div>
+          )}
+
+          {/* Upload area */}
+          <div>
+            <input
+              type="file"
+              id="backup-upload"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleUploadBackup(file);
+                e.target.value = '';
+              }}
+            />
+            <label
+              htmlFor="backup-upload"
+              className={`flex flex-col items-center justify-center gap-2 p-6 rounded-xl border-2 border-dashed border-slate-300 cursor-pointer hover:border-slate-400 hover:bg-slate-50 transition-all ${uploadingBackup ? 'opacity-50 pointer-events-none' : ''}`}
+            >
+              <Upload className="w-6 h-6 text-slate-400" />
+              <span className="text-sm font-medium text-slate-700">
+                {uploadingBackup ? 'Uploading...' : 'Click to upload a backup file'}
+              </span>
+              <span className="text-xs text-slate-400">
+                ZIP, tar.gz, or any archive format
+              </span>
+            </label>
+          </div>
+
+          {/* Existing backups list */}
+          {backups.length === 0 ? (
+            <EmptyState
+              icon={<FileArchive className="w-6 h-6" />}
+              title="No backups uploaded yet"
+              description="Uploaded backup files will appear here and be available to the client."
+            />
+          ) : (
+            <div className="space-y-2">
+              {backups.map((backup) => (
+                <div
+                  key={backup.id}
+                  className="flex items-center justify-between p-3 rounded-lg bg-slate-50 border border-slate-100"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-slate-200 flex items-center justify-center flex-shrink-0">
+                      <FileArchive className="w-4 h-4 text-slate-600" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-900 truncate">
+                        {backup.filename}
+                      </p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-xs text-slate-400">
+                          {formatDateTime(backup.created_at)}
+                        </p>
+                        <span className="text-slate-300">•</span>
+                        <p className="text-xs text-slate-400">
+                          {formatFileSize(backup.file_size)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      onClick={() => handleDownloadBackup(backup)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition-colors"
+                      title="Download"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteBackup(backup)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                      title="Delete"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

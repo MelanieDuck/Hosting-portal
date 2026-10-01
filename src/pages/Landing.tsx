@@ -16,6 +16,8 @@ import {
   X,
 } from 'lucide-react';
 import { Logo } from '@/components/Logo';
+import { useAuth } from '@/lib/auth';
+import { LayoutDashboard } from 'lucide-react';
 
 const HERO_IMG =
   'https://images.pexels.com/photos/285814/pexels-photo-285814.jpeg?auto=compress&cs=tinysrgb&w=1260&h=800&dpr=2';
@@ -138,6 +140,7 @@ function SectionBadge({ children }: { children: ReactNode }) {
 
 export function LandingPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { session } = useAuth();
 
   const scrollTo = (id: string) => {
     const el = document.getElementById(id);
@@ -182,19 +185,31 @@ export function LandingPage() {
               </button>
             </nav>
             <div className="hidden md:flex items-center gap-4">
-              <a
-                href="/#/login"
-                className="text-sm font-semibold text-slate-900 hover:text-slate-700 transition-colors"
-              >
-                Sign in
-              </a>
-              <a
-                href="/#/login"
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 transition-all shadow-sm"
-              >
-                Get Started
-                <ArrowRight className="w-4 h-4" />
-              </a>
+              {session ? (
+                <a
+                  href="/#/dashboard"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 transition-all shadow-sm"
+                >
+                  <LayoutDashboard className="w-4 h-4" />
+                  My Dashboard
+                </a>
+              ) : (
+                <>
+                  <a
+                    href="/#/login"
+                    className="text-sm font-semibold text-slate-900 hover:text-slate-700 transition-colors"
+                  >
+                    Sign in
+                  </a>
+                  <a
+                    href="/#/login"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 transition-all shadow-sm"
+                  >
+                    Get Started
+                    <ArrowRight className="w-4 h-4" />
+                  </a>
+                </>
+              )}
             </div>
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -236,19 +251,31 @@ export function LandingPage() {
                 FAQ
               </button>
               <div className="pt-3 border-t border-slate-100 flex flex-col gap-3">
-                <a
-                  href="/#/login"
-                  className="text-sm font-semibold text-slate-900 py-2"
-                >
-                  Sign in
-                </a>
-                <a
-                  href="/#/login"
-                  className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-slate-900 text-white text-sm font-semibold"
-                >
-                  Get Started
-                  <ArrowRight className="w-4 h-4" />
-                </a>
+                {session ? (
+                  <a
+                    href="/#/dashboard"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-slate-900 text-white text-sm font-semibold"
+                  >
+                    <LayoutDashboard className="w-4 h-4" />
+                    My Dashboard
+                  </a>
+                ) : (
+                  <>
+                    <a
+                      href="/#/login"
+                      className="text-sm font-semibold text-slate-900 py-2"
+                    >
+                      Sign in
+                    </a>
+                    <a
+                      href="/#/login"
+                      className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-slate-900 text-white text-sm font-semibold"
+                    >
+                      Get Started
+                      <ArrowRight className="w-4 h-4" />
+                    </a>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -287,11 +314,20 @@ export function LandingPage() {
               </p>
               <div className="mt-8 flex flex-col sm:flex-row gap-4">
                 <a
-                  href="/#/login"
+                  href={session ? "/#/dashboard" : "/#/login"}
                   className="inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-slate-900 text-white text-base font-semibold hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10"
                 >
-                  Get Your Landing Page
-                  <ArrowRight className="w-5 h-5" />
+                  {session ? (
+                    <>
+                      <LayoutDashboard className="w-5 h-5" />
+                      My Dashboard
+                    </>
+                  ) : (
+                    <>
+                      Get Your Landing Page
+                      <ArrowRight className="w-5 h-5" />
+                    </>
+                  )}
                 </a>
                 <button
                   onClick={() => scrollTo('why')}
@@ -686,11 +722,20 @@ export function LandingPage() {
           </p>
           <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
             <a
-              href="/#/login"
+              href={session ? "/#/dashboard" : "/#/login"}
               className="inline-flex items-center justify-center gap-2 px-8 py-4 rounded-xl bg-slate-900 text-white text-base font-semibold hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10"
             >
-              Get Started Today
-              <ArrowRight className="w-5 h-5" />
+              {session ? (
+                <>
+                  <LayoutDashboard className="w-5 h-5" />
+                  My Dashboard
+                </>
+              ) : (
+                <>
+                  Get Started Today
+                  <ArrowRight className="w-5 h-5" />
+                </>
+              )}
             </a>
             <button
               onClick={() => scrollTo('faq')}
@@ -732,10 +777,10 @@ export function LandingPage() {
                 FAQ
               </button>
               <a
-                href="/#/login"
+                href={session ? "/#/dashboard" : "/#/login"}
                 className="text-sm text-slate-500 hover:text-slate-900 transition-colors"
               >
-                Client Portal
+                {session ? "My Dashboard" : "Client Portal"}
               </a>
             </nav>
             <p className="text-sm text-slate-400">
