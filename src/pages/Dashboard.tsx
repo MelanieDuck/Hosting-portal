@@ -1,19 +1,17 @@
 import { useEffect, useState } from 'react';
 import {
   Globe,
-  Server,
   CreditCard,
   Calendar,
   TrendingUp,
   CheckCircle2,
   AlertCircle,
   ArrowRight,
-  Pencil,
   Save,
   X,
   ExternalLink,
 } from 'lucide-react';
-import { supabase, type Subscription, type Payment, type Profile } from '@/lib/supabase';
+import { supabase, type Subscription, type Payment, type Profile, type DnsRecord } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
 import { Card, CardHeader, Badge, Spinner, Button, EmptyState } from '@/components/ui';
 import { formatCurrency, formatDate, daysUntil } from '@/lib/format';
@@ -23,6 +21,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (key: PageKey) => vo
   const { user, profile } = useAuth();
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [recentPayments, setRecentPayments] = useState<Payment[]>([]);
+  const [dnsRecords, setDnsRecords] = useState<DnsRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Website address editing
@@ -34,7 +33,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (key: PageKey) => vo
     if (!user) return;
     let cancelled = false;
     (async () => {
-      const [subRes, payRes] = await Promise.all([
+      const [subRes, payRes, dnsRes] = await Promise.all([
         supabase
           .from('subscriptions')
           .select('*')
@@ -47,10 +46,16 @@ export function DashboardPage({ onNavigate }: { onNavigate: (key: PageKey) => vo
           .eq('user_id', user.id)
           .order('payment_date', { ascending: false })
           .limit(5),
+        supabase
+          .from('dns_records')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('sort_order', { ascending: true }),
       ]);
       if (cancelled) return;
       setSubscription(subRes.data as Subscription | null);
       setRecentPayments(payRes.data as Payment[]);
+      setDnsRecords((dnsRes.data ?? []) as DnsRecord[]);
       setLoading(false);
     })();
     return () => {
@@ -201,20 +206,9 @@ export function DashboardPage({ onNavigate }: { onNavigate: (key: PageKey) => vo
         />
         <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">
-                Website address
-              </p>
-              {!editingUrl && (
-                <button
-                  onClick={startEditingUrl}
-                  className="text-slate-400 hover:text-slate-700 transition-colors"
-                  title="Edit website address"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">
+              Website address
+            </p>
             {editingUrl ? (
               <div className="flex gap-2 items-start">
                 <input
@@ -256,24 +250,39 @@ export function DashboardPage({ onNavigate }: { onNavigate: (key: PageKey) => vo
                 <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" />
               </a>
             ) : (
-              <p className="text-sm font-medium text-slate-400">Not configured</p>
+              <button
+                onClick={startEditingUrl}
+                className="text-sm font-medium text-slate-400 hover:text-slate-700 transition-colors"
+              >
+                Not configured — click to set
+              </button>
             )}
           </div>
-          <div>
-            <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">
-              Server
+          <div className="sm:col-span-2">
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">
+              DNS Records
             </p>
-            <p className="text-sm font-medium text-slate-900">
-              {profile?.website_server || 'Not configured'}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">
-              Server IP
-            </p>
-            <p className="text-sm font-medium text-slate-900">
-              {profile?.website_ip || '—'}
-            </p>
+            {dnsRecords.length > 0 ? (
+              <div className="space-y-2">
+                {dnsRecords.map((rec) => (
+                  <div
+                    key={rec.id}
+                    className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 border border-slate-100"
+                  >
+                    <span className="inline-flex items-center justify-center w-16 py-1 rounded-md bg-slate-200 text-xs font-semibold text-slate-700">
+                      {rec.record_type}
+                    </span>
+                    <div className="flex-1 min-w-0 flex items-center gap-2">
+                      <span className="text-sm font-medium text-slate-900">{rec.host_name}</span>
+                      <span className="text-slate-300">→</span>
+                      <span className="text-sm text-slate-600 break-all">{rec.record_value}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm font-medium text-slate-400">No DNS records configured</p>
+            )}
           </div>
           <div>
             <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">

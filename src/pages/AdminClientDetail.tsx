@@ -26,6 +26,7 @@ import {
   type Payment,
   type ClientNote,
   type Backup,
+  type DnsRecord,
 } from '@/lib/supabase';
 import { Card, CardHeader, Badge, Spinner, Button, Modal, Input, Select, EmptyState } from '@/components/ui';
 import { formatCurrency, formatDate, formatDateTime, formatFileSize } from '@/lib/format';
@@ -46,6 +47,12 @@ export function AdminClientDetailPage({ userId }: { userId: string }) {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [notes, setNotes] = useState<ClientNote[]>([]);
   const [backups, setBackups] = useState<Backup[]>([]);
+  const [dnsRecords, setDnsRecords] = useState<DnsRecord[]>([]);
+  const [dnsDraft, setDnsDraft] = useState<{ record_type: string; host_name: string; record_value: string }[]>([
+    { record_type: 'A', host_name: '@', record_value: '' },
+    { record_type: 'CNAME', host_name: 'www', record_value: '' },
+  ]);
+  const [savingDns, setSavingDns] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Backup upload
@@ -72,12 +79,13 @@ export function AdminClientDetailPage({ userId }: { userId: string }) {
   const [savingSub, setSavingSub] = useState(false);
 
   const loadData = async () => {
-    const [profileRes, subRes, paymentsRes, notesRes, backupsRes] = await Promise.all([
+    const [profileRes, subRes, paymentsRes, notesRes, backupsRes, dnsRes] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
       supabase.from('subscriptions').select('*').eq('user_id', userId).maybeSingle(),
       supabase.from('payments').select('*').eq('user_id', userId).order('payment_date', { ascending: false }),
       supabase.from('client_notes').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
       supabase.from('backups').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+      supabase.from('dns_records').select('*').eq('user_id', userId).order('sort_order', { ascending: true }),
     ]);
 
     // Fetch email
@@ -90,6 +98,16 @@ export function AdminClientDetailPage({ userId }: { userId: string }) {
     setPayments(paymentsRes.data as Payment[]);
     setNotes(notesRes.data as ClientNote[]);
     setBackups(backupsRes.data as Backup[]);
+    const fetchedDns = (dnsRes.data ?? []) as DnsRecord[];
+    setDnsRecords(fetchedDns);
+    if (fetchedDns.length > 0) {
+      setDnsDraft(fetchedDns.map((r) => ({ record_type: r.record_type, host_name: r.host_name, record_value: r.record_value })));
+    } else {
+      setDnsDraft([
+        { record_type: 'A', host_name: '@', record_value: '' },
+        { record_type: 'CNAME', host_name: 'www', record_value: '' },
+      ]);
+    }
     setLoading(false);
   };
 
@@ -209,6 +227,23 @@ export function AdminClientDetailPage({ userId }: { userId: string }) {
     }
   };
 
+  const handleSaveDns = async () => {
+    setSavingDns(true);
+    await supabase.from('dns_records').delete().eq('user_id', userId);
+    const rows = dnsDraft.map((d, i) => ({
+      user_id: userId,
+      record_type: d.record_type || 'A',
+      host_name: d.host_name || '@',
+      record_value: d.record_value || '',
+      sort_order: i,
+    }));
+    if (rows.length > 0) {
+      await supabase.from('dns_records').insert(rows);
+    }
+    await loadData();
+    setSavingDns(false);
+  };
+
   if (loading) return <Spinner className="py-20" />;
 
   if (!profile) {
@@ -300,7 +335,17 @@ export function AdminClientDetailPage({ userId }: { userId: string }) {
         </Card>
 
         <Card>
-          <CardHeader title="Hosting Details" icon={<Server className="w-5 h-5" />} />
+          <CardHeader
+            title="Hosting Details"
+            subtitle="Domain and DNS records for this client"
+            icon={<Server className="w-5 h-5" />}
+            action={
+              <Button size="sm" variant="outline" loading={savingDns} onClick={handleSaveDns}>
+                <Save className="w-4 h-4" />
+                Save DNS
+              </Button>
+            }
+          />
           <div className="p-6 space-y-4">
             <div>
               <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Domain</p>
@@ -314,12 +359,50 @@ export function AdminClientDetailPage({ userId }: { userId: string }) {
               </a>
             </div>
             <div>
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Server</p>
-              <p className="text-sm font-medium text-slate-900">{profile.website_server || '—'}</p>
-            </div>
-            <div>
-              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">IP Address</p>
-              <p className="text-sm font-medium text-slate-900">{profile.website_ip || '—'}</p>
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">DNS Records</p>
+              <div className="space-y-2">
+                {dnsDraft.map((draft, idx) => (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <select
+                      value={draft.record_type}
+                      onChange={(e) => {
+                        const next = [...dnsDraft];
+                        next[idx] = { ...next[idx], record_type: e.target.value };
+                        setDnsDraft(next);
+                      }}
+                      className="w-20 px-2 py-2 rounded-lg border border-slate-300 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                    >
+                      <option value="A">A</option>
+                      <option value="CNAME">CNAME</option>
+                      <option value="MX">MX</option>
+                      <option value="TXT">TXT</option>
+                      <option value="AAAA">AAAA</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={draft.host_name}
+                      onChange={(e) => {
+                        const next = [...dnsDraft];
+                        next[idx] = { ...next[idx], host_name: e.target.value };
+                        setDnsDraft(next);
+                      }}
+                      placeholder="@ or www"
+                      className="w-24 px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                    />
+                    <input
+                      type="text"
+                      value={draft.record_value}
+                      onChange={(e) => {
+                        const next = [...dnsDraft];
+                        next[idx] = { ...next[idx], record_value: e.target.value };
+                        setDnsDraft(next);
+                      }}
+                      placeholder="192.168.1.1 or example.com"
+                      className="flex-1 px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </Card>

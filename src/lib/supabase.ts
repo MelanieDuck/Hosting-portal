@@ -83,6 +83,17 @@ export type Profile = {
   updated_at: string;
 };
 
+export type DnsRecord = {
+  id: string;
+  user_id: string;
+  record_type: string;
+  host_name: string;
+  record_value: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ClientNote = {
   id: string;
   user_id: string;
