@@ -8,10 +8,14 @@ import {
   CheckCircle2,
   AlertCircle,
   ArrowRight,
+  Pencil,
+  Save,
+  X,
+  ExternalLink,
 } from 'lucide-react';
 import { supabase, type Subscription, type Payment, type Profile } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth';
-import { Card, CardHeader, Badge, Spinner, EmptyState } from '@/components/ui';
+import { Card, CardHeader, Badge, Spinner, Button, EmptyState } from '@/components/ui';
 import { formatCurrency, formatDate, daysUntil } from '@/lib/format';
 import type { PageKey } from '@/components/Layout';
 
@@ -20,6 +24,11 @@ export function DashboardPage({ onNavigate }: { onNavigate: (key: PageKey) => vo
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [recentPayments, setRecentPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Website address editing
+  const [editingUrl, setEditingUrl] = useState(false);
+  const [urlValue, setUrlValue] = useState('');
+  const [savingUrl, setSavingUrl] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -50,6 +59,38 @@ export function DashboardPage({ onNavigate }: { onNavigate: (key: PageKey) => vo
   }, [user]);
 
   if (loading) return <Spinner className="py-20" />;
+
+  const handleSaveUrl = async () => {
+    if (!user) return;
+    setSavingUrl(true);
+    const normalized = urlValue.trim();
+    const { error } = await supabase
+      .from('profiles')
+      .update({ website_url: normalized })
+      .eq('id', user.id);
+    if (!error) {
+      setEditingUrl(false);
+      // Refresh profile in context
+      const { data: freshProfile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle();
+      // Local refresh — the auth context will pick this up on next render cycle
+      if (freshProfile) {
+        window.dispatchEvent(new Event('profile-updated'));
+      }
+    }
+    setSavingUrl(false);
+  };
+
+  const startEditingUrl = () => {
+    setUrlValue(profile?.website_url ?? '');
+    setEditingUrl(true);
+  };
+
+  const displayUrl = profile?.website_url || '';
+  const formattedUrl = displayUrl.startsWith('http') ? displayUrl : `https://${displayUrl}`;
 
   const daysToPayment = daysUntil(subscription?.next_payment_date ?? null);
   const greetingName = profile?.full_name?.split(' ')[0] || 'there';
@@ -160,17 +201,63 @@ export function DashboardPage({ onNavigate }: { onNavigate: (key: PageKey) => vo
         />
         <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div>
-            <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">
-              Website address
-            </p>
-            <a
-              href={profile?.website_url || '#'}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm font-medium text-slate-900 hover:text-slate-600 transition-colors break-all"
-            >
-              {profile?.website_url || 'Not configured'}
-            </a>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">
+                Website address
+              </p>
+              {!editingUrl && (
+                <button
+                  onClick={startEditingUrl}
+                  className="text-slate-400 hover:text-slate-700 transition-colors"
+                  title="Edit website address"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            {editingUrl ? (
+              <div className="flex gap-2 items-start">
+                <input
+                  type="text"
+                  value={urlValue}
+                  onChange={(e) => setUrlValue(e.target.value)}
+                  placeholder="mywebsite.com"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveUrl();
+                    if (e.key === 'Escape') setEditingUrl(false);
+                  }}
+                  className="flex-1 px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:border-transparent"
+                />
+                <button
+                  onClick={handleSaveUrl}
+                  disabled={savingUrl}
+                  className="p-2 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors disabled:opacity-50"
+                  title="Save"
+                >
+                  <Save className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setEditingUrl(false)}
+                  className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+                  title="Cancel"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : displayUrl ? (
+              <a
+                href={formattedUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors break-all"
+              >
+                {displayUrl}
+                <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" />
+              </a>
+            ) : (
+              <p className="text-sm font-medium text-slate-400">Not configured</p>
+            )}
           </div>
           <div>
             <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">

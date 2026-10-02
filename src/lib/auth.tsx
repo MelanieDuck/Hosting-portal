@@ -48,6 +48,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const refreshProfile = () => {
+      if (!user) return;
+      (async () => {
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle();
+        setProfile(data as Profile | null);
+      })();
+    };
+    window.addEventListener('profile-updated', refreshProfile);
+    return () => window.removeEventListener('profile-updated', refreshProfile);
+  }, [user]);
+
+  useEffect(() => {
     if (!user) {
       setProfile(null);
       return;
